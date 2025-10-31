@@ -1,4 +1,3 @@
-# app_focus_tracker_live_fixed.py
 import streamlit as st
 import cv2
 import mediapipe as mp
@@ -11,9 +10,6 @@ import plotly.graph_objs as go
 
 st.set_page_config(layout="wide", page_title="Synapse — Focus Tracker", page_icon="🧠")
 
-# -----------------------------
-# Session-state defaults
-# -----------------------------
 defaults = {
     'posture_history': [], 'head_tilt_history': [], 'yawn_times': [], 'phone_glances': [],
     'start_time': time.time(), 'session_active': False, 'session_ended': False,
@@ -26,9 +22,8 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# -----------------------------
-# MediaPipe setup (unchanged algorithms)
-# -----------------------------
+# MediaPipe
+
 mp_pose = mp.solutions.pose
 mp_face_mesh = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
@@ -42,9 +37,6 @@ NOSE = mp_pose.PoseLandmark.NOSE.value
 FOREHEAD_IDX = 10
 MOUTH_IDX = [61, 291, 13, 14, 78, 308, 311, 402, 0, 17]
 
-# -----------------------------
-# Helper functions (unchanged logic)
-# -----------------------------
 def now(): return time.time()
 
 def can_notify(event_key: str):
@@ -141,9 +133,8 @@ def compute_mouth_ratio(lm, mouth_points):
     hor = np.linalg.norm(coords[0]-coords[1]) if coords.shape[0] > 1 else 1.0
     return ver / hor if hor != 0 else 0
 
-# -----------------------------
-# Sidebar (yawn & cooldown only)
-# -----------------------------
+# Sidebar
+
 st.title("Synapse — Focus Tracker")
 with st.sidebar:
     st.markdown("## Controls & Settings")
@@ -157,9 +148,9 @@ with st.sidebar:
     calibrate_btn = st.button("Calibrate Posture & Head (optional)")
     st.markdown("Tips: calibrate while sitting upright and looking at the camera.")
 
-# -----------------------------
-# Landing dashboard (pre-session)
-# -----------------------------
+
+# Landing dashboard
+
 if not st.session_state['session_active'] and not st.session_state['session_ended']:
     st.header("Welcome to Synapse")
     st.write("Synapse monitors your posture and neck position to ensure your body stays healthy. It also detecs when you are tired and suggests breaks to ensure you don't burn out. Lastly, it tracks when you go on your phone and notifies to to stay focused.")
@@ -170,9 +161,9 @@ if not st.session_state['session_active'] and not st.session_state['session_ende
     st.write("- Click **End Session** once you are done and see your session summary.")
     st.info("Make sure your webcam is connected and your face is visible.")
 
-# -----------------------------
-# Start/End session logic (preserve data behavior)
-# -----------------------------
+
+# Start/End session
+
 if start_btn:
     st.session_state['posture_history'] = []
     st.session_state['head_tilt_history'] = []
@@ -183,16 +174,14 @@ if start_btn:
     st.session_state['session_ended'] = False
     st.session_state['baseline_nose_y'] = None
     st.session_state['calibration_done'] = False
-    # clear last_notified so notifications don't get suppressed immediately after restarting
     st.session_state['last_notified'] = {}
 
 if stop_btn:
     st.session_state['session_active'] = False
     st.session_state['session_ended'] = True
 
-# -----------------------------
 # Live session UI
-# -----------------------------
+
 if st.session_state['session_active']:
     main_col, right_col = st.columns([2.2, 1])
     frame_placeholder = main_col.empty()
@@ -202,21 +191,20 @@ if st.session_state['session_active']:
         headtilt_ph = st.empty()
         glance_ph = st.empty()
         yawn_ph = st.empty()
-        # Calibration info shown only while active
         if st.session_state['calibrated_posture'] is not None:
             st.info(f"Calibrated posture score: {st.session_state['calibrated_posture']:.1f}")
         if st.session_state['calibrated_head_tilt'] is not None:
             st.info(f"Calibrated head-tilt score: {st.session_state['calibrated_head_tilt']:.1f}")
 
-    # Camera settings (kept same thresholds as your working code)
+    # Camera
     cap = cv2.VideoCapture(0)
     initial_shoulder_y = None
     update_interval = 0.28
     GLANCE_THRESHOLD = 0.015   # small nose drop
-    POSTURE_IGNORE = 5         # allow small posture changes
+    POSTURE_IGNORE = 5
     YAWN_THRESHOLD = yawn_threshold
 
-    # ----------------- Main streaming loop -----------------
+    # Main streaming loop
     try:
         while st.session_state['session_active']:
             ret, frame = cap.read()
@@ -249,45 +237,38 @@ if st.session_state['session_active']:
                 if initial_shoulder_y is None:
                     initial_shoulder_y = (left_sh.y + right_sh.y) / 2
 
-                # initialize baseline_nose_y only once (if still None)
+                # initialize baseline_nose_y
                 if st.session_state.get('baseline_nose_y', None) is None:
                     st.session_state['baseline_nose_y'] = nose.y
 
-                # ----------------- AUTO-CALIBRATE ON FIRST POSE FRAME -----------------
-                # This is the fix: set calibrated_posture & calibrated_head_tilt when first good frame arrives
+                #AUTO-CALIBRATE
                 if not st.session_state.get('calibration_done', False):
                     st.session_state['calibrated_posture'] = compute_posture_score(lm_pose, initial_shoulder_y)
                     st.session_state['calibrated_head_tilt'] = compute_head_tilt_score(nose, forehead, left_sh, right_sh)
                     st.session_state['baseline_nose_y'] = nose.y
                     st.session_state['calibration_done'] = True
-                    # show success once
                     st.success("Calibration complete!")
 
-                # compute current posture & tilt
+                # posture/tilt
                 posture_val = compute_posture_score(lm_pose, initial_shoulder_y)
                 tilt_score = compute_head_tilt_score(nose, forehead, left_sh, right_sh)
 
-                # ---------------- Phone Glance Detection (corrected) ----------------
-                GLANCE_THRESHOLD = 0.015  # small nose drop
-                POSTURE_IGNORE = 5        # allow small posture changes
+                #Phone Glance
+                GLANCE_THRESHOLD = 0.015 
+                POSTURE_IGNORE = 5
 
-                # initialize baseline_nose_y once (if still None)
                 if st.session_state.get('baseline_nose_y', None) is None:
                     st.session_state['baseline_nose_y'] = nose.y
 
-                # ensure posture_history exists and has at least one entry (previous frame)
                 if 'posture_history' not in st.session_state:
                     st.session_state['posture_history'] = []
 
-                # compute current posture (already computed above as posture_val)
-                # compute posture_drop relative to previous recorded posture if available
                 if st.session_state['posture_history']:
                     prev_posture = st.session_state['posture_history'][-1][1]
                     posture_drop = prev_posture - posture_val
                 else:
                     posture_drop = 0.0
 
-                # ensure phone glance state keys exist
                 if 'phone_glance_active' not in st.session_state:
                     st.session_state['phone_glance_active'] = False
                 if 'phone_glances' not in st.session_state:
@@ -295,12 +276,11 @@ if st.session_state['session_active']:
 
                 # Detection
                 if not st.session_state['phone_glance_active']:
-                    # Start a phone glance only if nose drops below baseline and posture is stable
                     if (st.session_state['baseline_nose_y'] - nose.y) > GLANCE_THRESHOLD and abs(posture_drop) < POSTURE_IGNORE:
                         st.session_state['phone_glances'].append(current_time)
                         st.session_state['phone_glance_active'] = True
 
-                        # --- Notification + sound (use event_key for cooldown) ---
+                        # Noti/Sound
                         notify(
                             "You looked at your phone.",
                             "Get off of the phone and stay focused.",
@@ -309,19 +289,17 @@ if st.session_state['session_active']:
                             play_beep_browser=True
                         )
                 else:
-                    # Reset active flag when nose returns close to baseline
+                    # Reset active flag
                     if nose.y >= st.session_state['baseline_nose_y'] - (GLANCE_THRESHOLD / 2):
                         st.session_state['phone_glance_active'] = False
-                        # Update baseline after glance completes
                         st.session_state['baseline_nose_y'] = nose.y
 
-                # finally append the current posture & head-tilt for future frames
                 st.session_state['posture_history'].append((current_time, posture_val))
                 st.session_state['head_tilt_history'].append((current_time, tilt_score))
 
 
 
-                # draw shoulders line
+                # shoulder line
                 try:
                     pts = np.array([[int(left_sh.x * frame.shape[1]), int(left_sh.y * frame.shape[0])],
                                     [int(right_sh.x * frame.shape[1]), int(right_sh.y * frame.shape[0])]])
@@ -329,20 +307,18 @@ if st.session_state['session_active']:
                 except Exception:
                     pass
 
-                # ----------------- POSTURE & HEAD-TILT ALERTS (now will trigger) -----------------
-                # Posture alert: relative to calibration
+                # Post/Head tilt alerts
                 if st.session_state.get('calibrated_posture') is not None:
                     deviation = posture_val - st.session_state['calibrated_posture']
                     if deviation < -12:
                         notify("Fix your posture", "You're slouching. Sit up straight!", event_key="posture_bad", sound_file="alert.wav")
 
-                # Head-tilt alert: relative to calibration
                 if st.session_state.get('calibrated_head_tilt') is not None:
                     tilt_deviation = tilt_score - st.session_state['calibrated_head_tilt']
                     if abs(tilt_deviation) > 30:
                         notify("You're tilting your head", "Keep your head and neck straight.", event_key="head_tilt", sound_file="alert.wav")
 
-            # ---- Yawn detection ----
+            # ZZZZZ
             if results_face.multi_face_landmarks:
                 lm_face = results_face.multi_face_landmarks[0].landmark
                 mouth_ratio = compute_mouth_ratio(lm_face, MOUTH_IDX)
@@ -355,7 +331,7 @@ if st.session_state['session_active']:
                     if mouth_ratio <= (YAWN_THRESHOLD / 1.4):
                         st.session_state['yawn_active'] = False
 
-            # Display frame & update metrics
+            # Display metrics
             frame_placeholder.image(cv2.cvtColor(debug_frame, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
             posture_ph.metric("Posture", f"{posture_val:.1f}" if posture_val is not None else "—")
             headtilt_ph.metric("Head Tilt", f"{tilt_score:.1f}" if tilt_score is not None else "—")
@@ -377,9 +353,8 @@ if st.session_state['session_active']:
         except Exception:
             pass
 
-# -----------------------------
-# Summary (show when ended)
-# -----------------------------
+# Summary
+
 if st.session_state['session_ended'] and st.session_state['posture_history']:
     st.markdown("## Session Summary")
     start_t = st.session_state['start_time'] or st.session_state['posture_history'][0][0]
